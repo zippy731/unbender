@@ -19,7 +19,7 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
   - Remove edge markings only
   - Remove all faces (leaving wireframe)
   - Remove all fold edges except frozen ones
-  - Remove all fold edges
+  - Remove all fold edges (except Freestyle marks)
 
 - **Animation Control**
   - Shape key-based animation
@@ -33,11 +33,11 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
 
 ## Installation
 
-1. Download `unbender.py`
+1. Download `unbender.zip`
 2. Open Blender
 3. Go to Edit > Preferences > Add-ons
 4. Click "Install..."
-5. Navigate to and select the downloaded `unbender.py` file
+5. Navigate to and select the downloaded `unbender.zip` file
 6. Enable the add-on by checking its checkbox
 
 ## Usage
@@ -69,6 +69,8 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
 4. **Face Normals**
    - If faces appear inside-out, use the "Flip Face" tool
    - Select faces in Edit Mode to flip their normals
+   - Tip: Flipped faces will fold inward, opposite direction of adjacent faces, but require a small non-flat starting angle 
+
 
 ## Tutorial Videos (TBD)
 
@@ -76,6 +78,8 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
 
 - Large models may take longer to process
 - Complex geometry might require manual face normal adjustments
+-- if your object has non-flat n-gon faces, unfolding won't work
+- Flipped faces will fold inward, but require a slight non-180 degree starting angle 
 
 ## Contributing
 
@@ -96,4 +100,3 @@ Created by Chris Allen
   - Three unfolding methods
   - Edge marking system
   - Cleanup options
-
