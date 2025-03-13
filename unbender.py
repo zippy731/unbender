@@ -2073,7 +2073,7 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
         
         # Remove fold edges except frozen ones
         if cleanup_option == 'ALL_BUT_FROZEN':
-            print("  Removing fold edges (except frozen ones)")
+            print("  Removing fold edges (except frozen and freestyle ones)")
             
             # Get all fold edges from paths
             fold_edges = []
@@ -2087,6 +2087,7 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
             if fold_edges:
                 # First, identify which edges are frozen (have bevel weight > 0)
                 frozen_edge_indices = set()
+                freestyle_edge_indices = set()
                 
                 # Create a BMesh to access edge properties
                 bpy.ops.object.mode_set(mode='OBJECT')
@@ -2110,6 +2111,10 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                     edge_key2 = (v2, v1)
                     edge_map[edge_key1] = edge.index
                     edge_map[edge_key2] = edge.index
+                    
+                    # Check for freestyle edges using the proper property
+                    if edge.use_freestyle_mark:
+                        freestyle_edge_indices.add(edge.index)
                 
                 # If we have a bevel layer, identify frozen edges
                 if bevel_layer:
@@ -2127,6 +2132,7 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                 bm.free()
                 
                 print(f"    Found {len(frozen_edge_indices)} frozen edges to preserve")
+                print(f"    Found {len(freestyle_edge_indices)} freestyle edges to preserve")
                 
                 # Switch to edit mode
                 bpy.ops.object.mode_set(mode='EDIT')
@@ -2140,11 +2146,11 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                 # Switch to object mode to select specific edges
                 bpy.ops.object.mode_set(mode='OBJECT')
                 
-                # Select fold edges that are NOT frozen
+                # Select fold edges that are NOT frozen and NOT freestyle
                 edge_count = 0
                 for edge in mesh.edges:
-                    if edge.index in frozen_edge_indices:
-                        continue  # Skip frozen edges
+                    if edge.index in frozen_edge_indices or edge.index in freestyle_edge_indices:
+                        continue  # Skip frozen and freestyle edges
                         
                     v1, v2 = edge.vertices
                     
@@ -2159,7 +2165,7 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                         edge.select = True
                         edge_count += 1
                 
-                print(f"    Selected {edge_count} non-frozen fold edges for removal")
+                print(f"    Selected {edge_count} non-frozen, non-freestyle fold edges for removal")
                 
                 # Switch back to edit mode
                 bpy.ops.object.mode_set(mode='EDIT')
@@ -2167,15 +2173,15 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                 # Delete selected edges only, keeping vertices
                 if edge_count > 0:
                     bpy.ops.mesh.delete(type='EDGE')
-                    print(f"    Removed {edge_count} non-frozen fold edges, keeping all vertices")
+                    print(f"    Removed {edge_count} non-frozen, non-freestyle fold edges, keeping all vertices")
                 else:
-                    print("    No non-frozen fold edges found to remove")
+                    print("    No non-frozen, non-freestyle fold edges found to remove")
                 
                 # Update the mesh
                 bpy.ops.object.mode_set(mode='OBJECT')
                 mesh.update()
         
-        # Remove all fold edges (including frozen ones)
+        # Remove all fold edges (except freestyle ones)
         if cleanup_option == 'ALL':
             print("  Removing all fold edges (except freestyle edges)")
             
@@ -2189,6 +2195,16 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
             print(f"    Identified {len(fold_edges)} fold edges to check")
             
             if fold_edges:
+                # First, identify freestyle edges
+                freestyle_edge_indices = set()
+                
+                # Check for freestyle edges using the proper property
+                for edge in mesh.edges:
+                    if edge.use_freestyle_mark:
+                        freestyle_edge_indices.add(edge.index)
+                
+                print(f"    Found {len(freestyle_edge_indices)} freestyle edges to preserve")
+                
                 # Switch to edit mode
                 bpy.ops.object.mode_set(mode='EDIT')
                 
@@ -2201,19 +2217,13 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                 # Switch to object mode to select specific edges
                 bpy.ops.object.mode_set(mode='OBJECT')
                 
-                # Create BMesh to check freestyle edges
-                bm = bmesh.new()
-                bm.from_mesh(mesh)
-                
-                # Try to get the freestyle layer
-                freestyle_layer = bm.edges.layers.int.get('freestyle_edge')
-                
-                # Select fold edges that are not freestyle
+                # Select fold edges that are NOT freestyle
                 edge_count = 0
                 for edge in mesh.edges:
+                    if edge.index in freestyle_edge_indices:
+                        continue  # Skip freestyle edges
+                        
                     v1, v2 = edge.vertices
-                    edge_key1 = (v1, v2)
-                    edge_key2 = (v2, v1)
                     
                     # Check if this is a fold edge
                     is_fold_edge = False
@@ -2222,11 +2232,9 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
                             is_fold_edge = True
                             break
                     
-                    if is_fold_edge and edge.index not in freestyle_edge_indices:
+                    if is_fold_edge:
                         edge.select = True
                         edge_count += 1
-                
-                bm.free()
                 
                 print(f"    Selected {edge_count} non-freestyle fold edges for removal")
                 
