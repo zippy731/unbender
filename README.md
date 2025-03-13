@@ -1,6 +1,6 @@
-# Blender Unbender
+# Blender Un-Bender
 
-A Blender add-on that helps you unfold 3D models into flat patterns using animated shape keys. Perfect for creating papercraft models, origami designs, or any project requiring 3D to 2D unfolding.
+A Blender add-on that helps you create ANIMATIONS of unfolding 3D meshes into flat patterns using shape keys. Perfect for creating animations of papercraft models, origami designs, sheet-metal folding or any project requiring 3D to 2D unfolding.
 
 ## Features
 
@@ -19,7 +19,7 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
   - Remove edge markings only
   - Remove all faces (leaving wireframe)
   - Remove all fold edges except frozen ones
-  - Remove all fold edges (except Freestyle marks)
+  - Remove all fold edges
 
 - **Animation Control**
   - Shape key-based animation
@@ -69,10 +69,18 @@ A Blender add-on that helps you unfold 3D models into flat patterns using animat
 4. **Face Normals**
    - If faces appear inside-out, use the "Flip Face" tool
    - Select faces in Edit Mode to flip their normals
-   - Tip: Flipped faces will fold inward, opposite direction of adjacent faces, but require a small non-flat starting angle 
+   - Flipped faces will fold inward, opposite direction of adjacent faces 
 
+5. **Cleanup Options (cumulative)**
+   - None - leaves new object as-is
+   - Marks - removes any precut or freeze markings
+   - Faces - Removes faces, leaving just edges
+   - All but Frozen - Removes interior edges except for frozen edges
+   - All - removes all interior edges except for Freestyle marks
 
-## Tutorial Videos (TBD)
+## Tutorial Videos
+
+- [Unbender Tutorial Video](https://youtu.be/VIgPldT7Kkg?si=iVBdZHP4YLKeoyLt) - Basic workflow and features overview
 
 ## Known Issues
 
