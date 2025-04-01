@@ -1,12 +1,12 @@
 bl_info = {
     "name": "Blender Unbender",
     "author": "Chris Allen",
-    "version": (0, 9, 0),
+    "version": (0, 9, 1),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Unbender",
     "description": "Unfold 3D meshes with animated shapekeys",
     "warning": "",
-    "doc_url": "",
+    "doc_url": "https://github.com/zippy731/unbender",
     "category": "Object",
 }
 
@@ -863,13 +863,16 @@ def calculate_post_split_angles(mesh, paths, copy_obj, frozen_edges=None):
     to maintain the folded angle during animation.
     
     Args:
-        mesh: The mesh data after edge splitting
+        mesh: The mesh data after edge splitting (DEPRECATED - use copy_obj.data instead)
         paths: List of all paths
         copy_obj: The duplicated object with the split mesh
         frozen_edges: Set of edge keys (tuples of vertex indices) that should maintain their folded angle
                      (This parameter is kept for backward compatibility but not used)
     """
     print_subheader("CALCULATING POST-SPLIT UNFOLDING ANGLES")
+    
+    # Use the copy_obj's mesh data consistently
+    split_mesh = copy_obj.data
     
     # Create a BMesh to directly access edge bevel weight data in the post-split mesh
     import bmesh
@@ -878,9 +881,9 @@ def calculate_post_split_angles(mesh, paths, copy_obj, frozen_edges=None):
     if bpy.context.object.mode != 'OBJECT':
         bpy.ops.object.mode_set(mode='OBJECT')
     
-    # Create BMesh from the mesh
+    # Create BMesh from the split mesh
     bm = bmesh.new()
-    bm.from_mesh(mesh)
+    bm.from_mesh(split_mesh)
     bm.edges.ensure_lookup_table()
     
     # Try to get the bevel weight layer
@@ -935,14 +938,15 @@ def calculate_post_split_angles(mesh, paths, copy_obj, frozen_edges=None):
                     continue
                 
                 # Verify the connecting edge is actually shared between parent and child
-                parent_verts = set(mesh.polygons[parent_idx].vertices)
-                child_verts = set(mesh.polygons[face_idx].vertices)
+                # Use split_mesh consistently
+                parent_verts = set(split_mesh.polygons[parent_idx].vertices)
+                child_verts = set(split_mesh.polygons[face_idx].vertices)
                 
                 vA_idx, vB_idx = connecting_edge
                 if vA_idx not in parent_verts or vA_idx not in child_verts or vB_idx not in parent_verts or vB_idx not in child_verts:
                     print(f"  ERROR: Connecting edge {connecting_edge} is not valid for faces {parent_idx} and {face_idx}")
-                    # Find a valid connecting edge
-                    hinge = find_correct_hinge_vertices(mesh, parent_idx, face_idx)
+                    # Find a valid connecting edge using split_mesh
+                    hinge = find_correct_hinge_vertices(split_mesh, parent_idx, face_idx)
                     if hinge is None:
                         print(f"  CRITICAL ERROR: No valid hinge found between faces {parent_idx} and {face_idx}")
                         continue
@@ -976,13 +980,13 @@ def calculate_post_split_angles(mesh, paths, copy_obj, frozen_edges=None):
                     print(f"  [FROZEN-EDGE] Face {face_idx} (child of {parent_idx}): Edge {connecting_edge} is frozen, setting unfold angle to 0°")
                     continue
                 
-                # Get vertex positions for the hinge edge
+                # Get vertex positions from copy_obj
                 vA_co, vB_co = edge_verts_positions(copy_obj, connecting_edge)
                 
-                # Calculate angle using the direct normal-based method
+                # Calculate angle using faces from split_mesh
                 rotation_angle = calculate_rotation_angle_from_normals(
-                    mesh.polygons[parent_idx], 
-                    mesh.polygons[face_idx],
+                    split_mesh.polygons[parent_idx],
+                    split_mesh.polygons[face_idx],
                     vA_co, vB_co
                 )
                 
@@ -1002,15 +1006,15 @@ def calculate_rotation_angle_from_normals(parent_face, child_face, hinge_vA_co, 
     Calculate the rotation angle needed to make two faces coplanar with normals pointing
     in the SAME direction (parallel) after unfolding.
     
-    This function uses a direct mathematical approach:
-    1. Project both face normals onto a plane perpendicular to the hinge edge
-    2. Calculate the angle between these projections
-    3. Determine the correct rotation direction using the cross product
-    4. Invert the angle for unfolding (rather than folding)
+    For faces with exactly opposite normals (180°):
+    - Uses the relative position of the child face center to determine rotation direction
+    - Establishes a reference frame using the hinge and parent normal
+    - Determines if child is "inward" or "outward" relative to parent face
+    - Ensures consistent back-to-front folding based on geometric position
     
     Args:
-        parent_face: The parent face polygon
-        child_face: The child face polygon
+        parent_face: The parent face polygon (TRUNK)
+        child_face: The child face polygon (BRANCH)
         hinge_vA_co: 3D position of first vertex of the hinge edge
         hinge_vB_co: 3D position of second vertex of the hinge edge
         
@@ -1022,71 +1026,113 @@ def calculate_rotation_angle_from_normals(parent_face, child_face, hinge_vA_co, 
     child_normal = child_face.normal.copy()
     
     # Check if faces are already coplanar (normals are parallel or anti-parallel)
-    # We use a small threshold to account for floating-point precision
     normal_dot = parent_normal.dot(child_normal)
-    if abs(abs(normal_dot) - 1.0) < 1e-4:  # Normals are nearly parallel or anti-parallel
-        print(f"  [COPLANAR-FACES] Detected coplanar faces: dot product = {normal_dot:.6f}")
-        print(f"  [COPLANAR-FACES] Setting rotation angle to 0")
-        return 0.0  # No rotation needed
+    tolerance = 1e-4
     
-    # Calculate the rotation axis (the hinge edge direction)
-    hinge_vec = (hinge_vB_co - hinge_vA_co).normalized()
-    
-    # Project both normals onto a plane perpendicular to the hinge
-    # This isolates the components of the normals that will be affected by rotation
-    parent_proj = parent_normal - parent_normal.dot(hinge_vec) * hinge_vec
-    child_proj = child_normal - child_normal.dot(hinge_vec) * hinge_vec
-    
-    # Check if either projection is too small (nearly zero)
-    # This can happen when a face normal is nearly parallel to the hinge
-    if parent_proj.length < 1e-6 or child_proj.length < 1e-6:
-        print(f"  [DEGENERATE-CASE] Detected face normal nearly parallel to hinge")
-        print(f"  [DEGENERATE-CASE] Parent projection length: {parent_proj.length:.6f}")
-        print(f"  [DEGENERATE-CASE] Child projection length: {child_proj.length:.6f}")
-        print(f"  [DEGENERATE-CASE] Setting rotation angle to 0")
-        return 0.0  # Skip rotation for this degenerate case
-    
-    # Normalize the projections
-    parent_proj.normalize()
-    child_proj.normalize()
-    
-    # Calculate the angle between the projected normals
-    # This is the exact angle needed to make the faces coplanar
-    dot_product = parent_proj.dot(child_proj)
-    
-    # Handle numerical precision issues with dot product
-    dot_product = max(min(dot_product, 1.0), -1.0)
-    
-    angle = math.acos(dot_product)
-    
-    # If angle is very small, consider faces already aligned
-    if angle < 1e-4:  # Less than ~0.006 degrees
-        print(f"  [SMALL-ANGLE] Detected very small angle: {math.degrees(angle):.6f}°")
-        print(f"  [SMALL-ANGLE] Setting rotation angle to 0")
+    if abs(normal_dot - 1.0) < tolerance:  # Parallel normals
+        print(f"Case: PARALLEL normals")
+        print(f"Setting rotation angle to 0")
         return 0.0
-    
-    # Determine the sign of the rotation using the cross product
-    # This tells us which direction to rotate to align the normals
-    cross_product = parent_proj.cross(child_proj)
-    sign = 1 if cross_product.dot(hinge_vec) > 0 else -1
-    
-    # Calculate the signed rotation angle
-    rotation_angle = sign * angle
-
-    # Invert the angle - we want to unfold, not fold
-    # The calculated angle shows how much the faces are currently folded
-    # To unfold, we need to rotate in the opposite direction
-    rotation_angle = -rotation_angle
-    
-    # Debug output
-    print(f"  [NORMAL-ANGLE-DEBUG] Parent normal: {parent_normal}, Child normal: {child_normal}")
-    print(f"  [NORMAL-ANGLE-DEBUG] Hinge vector: {hinge_vec}")
-    print(f"  [NORMAL-ANGLE-DEBUG] Projected parent: {parent_proj}, Projected child: {child_proj}")
-    print(f"  [NORMAL-ANGLE-DEBUG] Dot product: {dot_product:.4f}, Angle between projections: {math.degrees(angle):.4f}°")
-    print(f"  [NORMAL-ANGLE-DEBUG] Cross product: {cross_product}, Sign: {sign}")
-    print(f"  [NORMAL-ANGLE-DEBUG] Final rotation angle: {math.degrees(rotation_angle):.4f}°")
-    
-    return rotation_angle
+        
+    elif abs(normal_dot + 1.0) < tolerance:  # Anti-parallel normals (180° case)
+        print(f"\n=== ANTI-PARALLEL (180°) CASE DEBUG ===")
+        print(f"Parent face index: {parent_face.index}, Normal: {parent_normal}")
+        print(f"Child face index: {child_face.index}, Normal: {child_normal}")
+        print(f"Dot product: {normal_dot:.6f}")
+        
+        # Calculate hinge vector and center
+        hinge_vec = (hinge_vB_co - hinge_vA_co).normalized()
+        hinge_center = (hinge_vA_co + hinge_vB_co) / 2.0
+        
+        # Parent normal defines 'up' (local Z)
+        axis_z = parent_normal  # Already normalized
+        
+        # Define 'outward' direction (local Y) perpendicular to hinge(X) and parent_normal(Z)
+        # Z cross X = Y (right-hand rule)
+        axis_y = axis_z.cross(hinge_vec).normalized()
+        
+        # Check for degenerate case: parent_normal parallel to hinge_vec
+        if abs(axis_z.dot(hinge_vec)) > (1.0 - 1e-6):
+            print("  Warning: Parent normal is parallel to hinge axis in 180-degree case.")
+            print("  Cannot determine unique rotation direction. Defaulting to +pi unfold.")
+            return math.pi
+            
+        # Calculate child face center using vertex positions
+        child_center = mathutils.Vector((0, 0, 0))
+        for v_idx in child_face.vertices:
+            child_center += child_face.id_data.vertices[v_idx].co
+        child_center /= len(child_face.vertices)
+        
+        # Vector from hinge center to child center
+        child_rel_pos = child_center - hinge_center
+        
+        # Project relative position onto the 'outward' axis (Y)
+        side_component = child_rel_pos.dot(axis_y)
+        
+        print(f"  Hinge Axis (X-like): {hinge_vec}")
+        print(f"  Parent Normal (Z-like): {axis_z}")
+        print(f"  Outward Axis (Y-like): {axis_y}")
+        print(f"  Child Center: {child_center}")
+        print(f"  Hinge Center: {hinge_center}")
+        print(f"  Child Relative Position: {child_rel_pos}")
+        print(f"  Side Component (Child dot Outward): {side_component:.6f}")
+        
+        # Determine rotation direction based on child position
+        zero_tolerance = 1e-6
+        if side_component > zero_tolerance:
+            print("  Child is on positive 'outward' side. Needs CCW (+pi) unfold.")
+            unfold_angle = math.pi
+        elif side_component < -zero_tolerance:
+            print("  Child is on negative 'inward' side. Needs CW (-pi) unfold.")
+            unfold_angle = -math.pi
+        else:
+            print("  Child center lies ~on hinge-parent_normal plane. Ambiguous 180 flip.")
+            print("  Defaulting to +pi unfold.")
+            unfold_angle = math.pi
+            
+        print(f"  Final unfold angle: {math.degrees(unfold_angle):.4f}°")
+        print(f"=== END 180 DEBUG ===\n")
+        return unfold_angle
+        
+    else:  # Standard non-parallel case
+        print(f"\n=== STANDARD ANGLE CASE ===")
+        hinge_vec = (hinge_vB_co - hinge_vA_co).normalized()
+        
+        # Project both normals onto plane perpendicular to hinge
+        parent_proj = parent_normal - parent_normal.dot(hinge_vec) * hinge_vec
+        child_proj = child_normal - child_normal.dot(hinge_vec) * hinge_vec
+        
+        if parent_proj.length < 1e-6 or child_proj.length < 1e-6:
+            print(f"  [DEGENERATE-PROJ] Normal parallel to hinge. Angle 0.")
+            return 0.0
+            
+        parent_proj.normalize()
+        child_proj.normalize()
+        
+        dot_product_proj = max(min(parent_proj.dot(child_proj), 1.0), -1.0)
+        angle = math.acos(dot_product_proj)
+        
+        if angle < 1e-4:
+            print(f"  [SMALL-ANGLE] Projections aligned. Angle 0.")
+            return 0.0
+            
+        cross_product = parent_proj.cross(child_proj)
+        sign = 1 if cross_product.dot(hinge_vec) > 0 else -1
+        
+        # Signed angle represents CURRENT fold state
+        current_signed_angle = sign * angle
+        
+        # Unfold angle is the negative
+        rotation_angle = -current_signed_angle
+        
+        print(f"  Parent normal: {parent_normal}, Child normal: {child_normal}")
+        print(f"  Dot product projected: {dot_product_proj:.4f}, Angle between projections: {math.degrees(angle):.4f}°")
+        print(f"  Cross product projected: {cross_product}, Sign: {sign}")
+        print(f"  Current Fold Angle (signed): {math.degrees(current_signed_angle):.4f}°")
+        print(f"  Final Unfold Angle: {math.degrees(rotation_angle):.4f}°")
+        print(f"=== END STANDARD DEBUG ===\n")
+        
+        return rotation_angle
 
 def identify_and_split_seam_edges(mesh, copy_obj):
     """
@@ -1691,6 +1737,19 @@ def unfold_papercraft(unfold_method='BY_PATH', cleanup_option='NONE'):
     mesh.update()
     print(f"Created duplicate object: {copy_obj.name}")
     print(f"Mesh stats: {len(mesh.vertices)} vertices, {len(mesh.edges)} edges, {len(mesh.polygons)} faces")
+    
+    # 2.1) Remove any existing shape keys and animations from the copy
+    print_subheader("CLEANING UP EXISTING SHAPE KEYS AND ANIMATIONS")
+    if copy_obj.data.shape_keys:
+        print("  Removing existing shape keys")
+        while copy_obj.data.shape_keys:
+            copy_obj.shape_key_remove(copy_obj.data.shape_keys.key_blocks[0])
+    
+    # Remove any existing drivers
+    if copy_obj.animation_data and copy_obj.animation_data.drivers:
+        print("  Removing existing drivers")
+        for driver in copy_obj.animation_data.drivers:
+            copy_obj.driver_remove(driver.data_path, -1)
     
     # 2.25) Check if the original object has an 'origin' vertex group and transfer it to the copy
     origin_group_idx = None
